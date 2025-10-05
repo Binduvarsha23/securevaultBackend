@@ -1,22 +1,12 @@
 import express from "express";
 import SecurityConfig from "../models/securityConfig.js";
-import nodemailer from "nodemailer";
 
 const router = express.Router();
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-// Get user's config
+// ------------------- Get User Config -------------------
 router.get("/:userId", async (req, res) => {
   try {
     const config = await SecurityConfig.findOne({ userId: req.params.userId });
-
     if (!config) {
       return res.status(200).json({
         setupRequired: true,
@@ -24,14 +14,14 @@ router.get("/:userId", async (req, res) => {
         config: null,
       });
     }
-
     res.json({ setupRequired: false, config });
   } catch (err) {
-    res.status(500).json({ message: "Error fetching config" });
+    console.error("Error fetching config:", err);
+    res.status(500).json({ message: "Error fetching config", error: err.message });
   }
 });
 
-// Create default config
+// ------------------- Create Default Config -------------------
 router.post("/", async (req, res) => {
   const { userId } = req.body;
   try {
@@ -42,17 +32,17 @@ router.post("/", async (req, res) => {
     await config.save();
     res.status(201).json(config);
   } catch (err) {
-    res.status(500).json({ message: "Error creating config" });
+    console.error("Error creating config:", err);
+    res.status(500).json({ message: "Error creating config", error: err.message });
   }
 });
 
-// Update config
+// ------------------- Update Config -------------------
 router.put("/:userId", async (req, res) => {
   const { userId } = req.params;
   try {
     const update = {};
 
-    // Handle each auth method explicitly
     if ('passwordEnabled' in req.body) {
       update.passwordEnabled = req.body.passwordEnabled;
       if (req.body.passwordHash) update.passwordHash = req.body.passwordHash;
@@ -71,39 +61,33 @@ router.put("/:userId", async (req, res) => {
     if ('biometricEnabled' in req.body) {
       update.biometricEnabled = req.body.biometricEnabled;
       if (!req.body.biometricEnabled) {
-        // If disabling, clear credentials
         update.biometricCredentials = [];
       } else if (req.body.biometricCredentials) {
-        // If enabling AND new credentials are provided from frontend, set them
-        // This assumes the frontend sends the full array, including existing ones
         update.biometricCredentials = req.body.biometricCredentials;
       }
     }
-    
-    // Ensure biometricHash is explicitly removed if it's sent from frontend and not needed
-    // This handles cases where frontend might send null/undefined for it.
-    if ('biometricHash' in req.body) {
-        update.biometricHash = req.body.biometricHash; // Will be null from frontend
-    }
 
+    if ('biometricHash' in req.body) {
+      update.biometricHash = req.body.biometricHash;
+    }
 
     update.updatedAt = new Date();
 
-const config = await SecurityConfig.findOneAndUpdate(
-  { userId },
-  { $set: update }, // ✅ use the cleaned + safe update object
-  { new: true, upsert: true }
-);
+    const config = await SecurityConfig.findOneAndUpdate(
+      { userId },
+      { $set: update },
+      { new: true, upsert: true }
+    );
 
     if (!config) return res.status(404).json({ message: "Config not found" });
     res.json(config);
   } catch (err) {
     console.error("Update error:", err);
-    res.status(500).json({ message: "Error updating config" });
+    res.status(500).json({ message: "Error updating config", error: err.message });
   }
 });
 
-// Verify method
+// ------------------- Verify Method -------------------
 router.post("/verify", async (req, res) => {
   const { userId, value, method } = req.body;
   try {
@@ -120,11 +104,7 @@ router.post("/verify", async (req, res) => {
     } else if (method === "pattern" && config.patternHash) {
       isMatch = await bcrypt.compare(value, config.patternHash);
     } else if (method === "biometric") {
-      // For biometric, the actual verification happens on the client side
-      // with the WebAuthn API. The backend would typically verify the
-      // attestation/assertion from the client.
-      // For this simplified demo, we'll assume the client-side WebAuthn call
-      // was successful if it reached here.
+      // For demo purposes, we assume client-side biometric validation
       isMatch = true;
     }
 
@@ -135,10 +115,12 @@ router.post("/verify", async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ message: "Verification failed" });
+    console.error("Verification failed:", err);
+    res.status(500).json({ message: "Verification failed", error: err.message });
   }
 });
 
+// ------------------- Security Questions -------------------
 router.put("/security-questions/:userId", async (req, res) => {
   const { questions } = req.body;
 
@@ -151,7 +133,7 @@ router.put("/security-questions/:userId", async (req, res) => {
       { userId: req.params.userId },
       {
         $set: {
-          securityQuestions: questions, // ✅ Already hashed from frontend
+          securityQuestions: questions,
           securityQuestionsLastUpdatedAt: new Date(),
         },
       },
@@ -161,14 +143,13 @@ router.put("/security-questions/:userId", async (req, res) => {
     res.json(config);
   } catch (err) {
     console.error("Error saving questions:", err);
-    res.status(500).json({ message: "Error saving questions" });
+    res.status(500).json({ message: "Error saving questions", error: err.message });
   }
 });
 
-// Verify one security answer
+// ------------------- Verify Security Answer -------------------
 router.post("/verify-security-answer", async (req, res) => {
   const { userId, question, answer } = req.body;
-
   try {
     const config = await SecurityConfig.findOne({ userId });
     if (!config || !config.securityQuestions?.length) {
@@ -190,77 +171,23 @@ router.post("/verify-security-answer", async (req, res) => {
       return res.status(401).json({ message: "Incorrect answer" });
     }
   } catch (err) {
-    res.status(500).json({ message: "Verification failed" });
+    console.error("Verification failed:", err);
+    res.status(500).json({ message: "Verification failed", error: err.message });
   }
 });
 
-router.post("/request-method-reset", async (req, res) => {
-  try {
-    const { email, userId } = req.body;
-
-    if (!email || !userId) {
-      return res.status(400).json({ message: "Email and userId are required" });
-    }
-
-    console.log("Incoming reset request for:", email, userId);
-
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const resetExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-    const bcrypt = await import("bcryptjs");
-    const hashedToken = await bcrypt.hash(resetCode, 10);
-
-    await SecurityConfig.findOneAndUpdate(
-      { userId },
-      {
-        $set: {
-          passwordResetToken: hashedToken,
-          passwordResetTokenExpiry: resetExpiresAt,
-        },
-      },
-      { upsert: true }
-    );
-
-    try {
-      await transporter.sendMail({
-        from: process.env.EMAIL_USER,
-        to: email,
-        subject: "Your Password Reset Code",
-        text: `Your reset code is: ${resetCode}. It will expire in 10 minutes.`,
-      });
-
-      console.log("✅ Email sent to:", email);
-      res.json({ success: true, message: "Reset code sent successfully" });
-    } catch (emailError) {
-      console.error("❌ Failed to send email:", emailError);
-      return res.status(500).json({ message: "Failed to send email", error: emailError.message });
-    }
-  } catch (error) {
-    console.error("Reset method error:", error);
-    res.status(500).json({ message: "Internal server error", error: error.message });
-  }
-});
-
-// Reset method using token
+// ------------------- Reset Method With Token -------------------
 router.post("/reset-method-with-token", async (req, res) => {
   const { userId, token, methodType, newValue } = req.body;
-
   try {
     const config = await SecurityConfig.findOne({ userId });
-    if (
-      !config ||
-      !config.passwordResetToken ||
-      !config.passwordResetTokenExpiry ||
-      config.passwordResetTokenExpiry < new Date()
-    ) {
+    if (!config || !config.passwordResetToken || !config.passwordResetTokenExpiry || config.passwordResetTokenExpiry < new Date()) {
       return res.status(400).json({ message: "Invalid or expired reset code." });
     }
 
     const bcrypt = await import("bcryptjs");
     const isTokenValid = await bcrypt.compare(token, config.passwordResetToken);
-    if (!isTokenValid) {
-      return res.status(400).json({ message: "Invalid reset code." });
-    }
+    if (!isTokenValid) return res.status(400).json({ message: "Invalid reset code." });
 
     const hashedNewValue = await bcrypt.hash(newValue, 10);
 
@@ -283,7 +210,8 @@ router.post("/reset-method-with-token", async (req, res) => {
 
     res.json({ success: true, message: `${methodType} has been reset successfully.` });
   } catch (err) {
-    res.status(500).json({ message: "Error resetting method." });
+    console.error("Error resetting method:", err);
+    res.status(500).json({ message: "Error resetting method", error: err.message });
   }
 });
 
