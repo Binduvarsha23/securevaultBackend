@@ -1,5 +1,6 @@
 import express from "express";
 import SecurityConfig from "../models/securityConfig.js";
+import { authenticator } from "otplib";
 
 const router = express.Router();
 
@@ -41,7 +42,7 @@ router.post("/", async (req, res) => {
 router.put("/:userId", async (req, res) => {
   const { userId } = req.params;
   try {
-    const update = {};
+    const update: any = {};
 
     if ('passwordEnabled' in req.body) {
       update.passwordEnabled = req.body.passwordEnabled;
@@ -58,17 +59,9 @@ router.put("/:userId", async (req, res) => {
       if (req.body.patternHash) update.patternHash = req.body.patternHash;
     }
 
-    if ('biometricEnabled' in req.body) {
-      update.biometricEnabled = req.body.biometricEnabled;
-      if (!req.body.biometricEnabled) {
-        update.biometricCredentials = [];
-      } else if (req.body.biometricCredentials) {
-        update.biometricCredentials = req.body.biometricCredentials;
-      }
-    }
-
-    if ('biometricHash' in req.body) {
-      update.biometricHash = req.body.biometricHash;
+    if ('totpEnabled' in req.body) {
+      update.totpEnabled = req.body.totpEnabled;
+      if ('totpSecret' in req.body) update.totpSecret = req.body.totpSecret;
     }
 
     update.updatedAt = new Date();
@@ -79,7 +72,6 @@ router.put("/:userId", async (req, res) => {
       { new: true, upsert: true }
     );
 
-    if (!config) return res.status(404).json({ message: "Config not found" });
     res.json(config);
   } catch (err) {
     console.error("Update error:", err);
@@ -103,9 +95,6 @@ router.post("/verify", async (req, res) => {
       isMatch = await bcrypt.compare(value, config.passwordHash);
     } else if (method === "pattern" && config.patternHash) {
       isMatch = await bcrypt.compare(value, config.patternHash);
-    } else if (method === "biometric") {
-      // For demo purposes, we assume client-side biometric validation
-      isMatch = true;
     }
 
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
@@ -120,6 +109,52 @@ router.post("/verify", async (req, res) => {
   }
 });
 
+// ------------------- Setup TOTP -------------------
+router.post("/setup-totp/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const config = await SecurityConfig.findOne({ userId });
+    if (!config) return res.status(404).json({ message: "User config not found" });
+
+    const secret = authenticator.generateSecret();
+    config.totpSecret = secret;
+    config.totpEnabled = true;
+    await config.save();
+
+    const otpauthUrl = authenticator.keyuri(
+      `${userId}@securevault`,
+      "SecureVault",
+      secret
+    );
+
+    res.json({ secret, otpauthUrl });
+  } catch (err) {
+    console.error("TOTP setup error:", err);
+    res.status(500).json({ message: "Error setting up TOTP", error: err.message });
+  }
+});
+
+// ------------------- Verify TOTP -------------------
+router.post("/verify-totp", async (req, res) => {
+  const { userId, code } = req.body;
+  try {
+    const config = await SecurityConfig.findOne({ userId });
+    if (!config || !config.totpEnabled || !config.totpSecret)
+      return res.status(400).json({ message: "TOTP not set up" });
+
+    const isValid = authenticator.check(code, config.totpSecret);
+    if (!isValid) return res.status(401).json({ message: "Invalid TOTP code" });
+
+    config.lastVerifiedAt = new Date();
+    await config.save();
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("TOTP verification error:", err);
+    res.status(500).json({ message: "TOTP verification failed", error: err.message });
+  }
+});
+
 // ------------------- Security Questions -------------------
 router.put("/security-questions/:userId", async (req, res) => {
   const { questions } = req.body;
@@ -131,15 +166,9 @@ router.put("/security-questions/:userId", async (req, res) => {
   try {
     const config = await SecurityConfig.findOneAndUpdate(
       { userId: req.params.userId },
-      {
-        $set: {
-          securityQuestions: questions,
-          securityQuestionsLastUpdatedAt: new Date(),
-        },
-      },
+      { $set: { securityQuestions: questions, securityQuestionsLastUpdatedAt: new Date() } },
       { new: true }
     );
-
     res.json(config);
   } catch (err) {
     console.error("Error saving questions:", err);
@@ -152,9 +181,8 @@ router.post("/verify-security-answer", async (req, res) => {
   const { userId, question, answer } = req.body;
   try {
     const config = await SecurityConfig.findOne({ userId });
-    if (!config || !config.securityQuestions?.length) {
+    if (!config || !config.securityQuestions?.length)
       return res.status(404).json({ message: "No security questions set" });
-    }
 
     const bcrypt = await import("bcryptjs");
     const match = await Promise.all(
