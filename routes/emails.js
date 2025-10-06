@@ -20,16 +20,18 @@ router.post("/send-totp", async (req, res) => {
 
   try {
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+      host: process.env.EMAIL_HOST,
+      port: Number(process.env.EMAIL_PORT),
+      secure: false, // TLS
       auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS, // 16-character App Password
+        pass: process.env.EMAIL_PASS,
       },
     });
 
-    // Verify transporter connection before sending
+    // Optional: verify SMTP connection
     await transporter.verify();
-    console.log("✅ SMTP connection successful");
+    console.log("✅ SMTP connection verified");
 
     const mailOptions = {
       from: `"SecureVault" <${process.env.EMAIL_USER}>`,
@@ -40,22 +42,20 @@ router.post("/send-totp", async (req, res) => {
           <h2>SecureVault Login Verification</h2>
           <p>Your one-time code is:</p>
           <div style="font-size:24px; font-weight:bold; color:#2c3e50;">${totp}</div>
-          <p>This code expires in 60 seconds. Do not share it.</p>
+          <p>This code expires in 5 minutes. Do not share it.</p>
         </div>
       `,
     };
 
     const info = await transporter.sendMail(mailOptions);
+
     console.log("✅ Email sent successfully");
     console.log("Message ID:", info.messageId);
     console.log("Response:", info.response);
 
     res.status(200).json({ message: "TOTP email sent successfully" });
   } catch (err) {
-    console.error("🚨 Error sending email:");
-    console.error("Name:", err.name);
-    console.error("Message:", err.message);
-    console.error("Stack:", err.stack);
+    console.error("🚨 Error sending email:", err);
     res.status(500).json({ message: "Failed to send TOTP", error: err.message });
   }
 });
