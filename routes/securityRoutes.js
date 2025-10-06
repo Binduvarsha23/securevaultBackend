@@ -42,7 +42,7 @@ router.post("/", async (req, res) => {
 router.put("/:userId", async (req, res) => {
   const { userId } = req.params;
   try {
-    const update: any = {};
+const update = {};
 
     if ('passwordEnabled' in req.body) {
       update.passwordEnabled = req.body.passwordEnabled;
@@ -244,3 +244,4 @@ router.post("/reset-method-with-token", async (req, res) => {
 });
 
 export default router;
+
