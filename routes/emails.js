@@ -9,20 +9,28 @@ const router = express.Router();
 router.post("/send-totp", async (req, res) => {
   const { email, totp } = req.body;
 
-  if (!email || !totp)
+  if (!email || !totp) {
+    console.error("❌ Missing email or TOTP in request body");
     return res.status(400).json({ message: "Email and TOTP required" });
+  }
+
+  console.log("📩 Preparing to send TOTP email...");
+  console.log("Recipient:", email);
+  console.log("TOTP:", totp);
 
   try {
-    // Gmail SMTP setup
     const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS, // app password from Google
+        pass: process.env.EMAIL_PASS, // 16-character App Password
       },
     });
 
-    // email content
+    // Verify transporter connection before sending
+    await transporter.verify();
+    console.log("✅ SMTP connection successful");
+
     const mailOptions = {
       from: `"SecureVault" <${process.env.EMAIL_USER}>`,
       to: email,
@@ -37,11 +45,18 @@ router.post("/send-totp", async (req, res) => {
       `,
     };
 
-    await transporter.sendMail(mailOptions);
-    res.status(200).json({ message: "TOTP email sent" });
+    const info = await transporter.sendMail(mailOptions);
+    console.log("✅ Email sent successfully");
+    console.log("Message ID:", info.messageId);
+    console.log("Response:", info.response);
+
+    res.status(200).json({ message: "TOTP email sent successfully" });
   } catch (err) {
-    console.error("Error sending email:", err);
-    res.status(500).json({ message: "Failed to send TOTP" });
+    console.error("🚨 Error sending email:");
+    console.error("Name:", err.name);
+    console.error("Message:", err.message);
+    console.error("Stack:", err.stack);
+    res.status(500).json({ message: "Failed to send TOTP", error: err.message });
   }
 });
 
