@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
 
-// models/Vault.js
 const vaultSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true },
@@ -9,11 +8,12 @@ const vaultSchema = new mongoose.Schema(
     password: { type: String, required: true },
     url: { type: String },
     notes: { type: String },
-    tags: { type: [String], default: [] }, // NEW: tags/folders
+    tags: { type: [String], default: [] },
   },
   { timestamps: true }
 );
 
+// Add unique index to prevent duplicates
+vaultSchema.index({ userId: 1, title: 1, username: 1 }, { unique: true });
 
 export default mongoose.model("Vault", vaultSchema);
-
