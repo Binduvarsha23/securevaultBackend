@@ -97,22 +97,91 @@ export const exportVaults = async (req, res) => {
 /**
  * ✅ IMPORT vaults from JSON
  */
+/**
+ * ✅ IMPORT vaults from JSON
+ */
 export const importVaults = async (req, res) => {
   try {
-    const { userId, vaults } = req.body; // vaults = array of encrypted vault items
+    console.log("Import request received:", { userId: req.body.userId, vaultsCount: req.body.vaults?.length }); // Debug log
 
-    if (!Array.isArray(vaults)) return res.status(400).json({ message: "Invalid vault data" });
+    const { userId, vaults } = req.body;
 
-    const createdVaults = [];
-    for (const item of vaults) {
-      // Ensure each item has userId set correctly
-      const vault = await Vault.create({ ...item, userId });
-      createdVaults.push(vault);
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
     }
 
-    res.status(201).json({ message: "Vaults imported", count: createdVaults.length });
+    if (!Array.isArray(vaults)) {
+      console.error("Invalid vaults format:", typeof vaults);
+      return res.status(400).json({ message: "Invalid vault data: vaults must be an array" });
+    }
+
+    if (vaults.length === 0) {
+      return res.status(400).json({ message: "No vaults to import" });
+    }
+
+    const createdVaults = [];
+    const skippedVaults = [];
+
+    for (const item of vaults) {
+      try {
+        // Validate required fields
+        if (!item.title || !item.username || !item.password) {
+          console.warn("Skipping invalid vault (missing required fields):", item.title || 'Unknown');
+          skippedVaults.push(item.title || 'Unknown');
+          continue;
+        }
+
+        // Ensure tags is an array
+        item.tags = Array.isArray(item.tags) ? item.tags : item.tags ? [item.tags.toString()] : [];
+
+        // Check for existing vault (by _id or userId + title + username)
+        const existingVault = await Vault.findOne({
+          $or: [
+            { _id: item._id },
+            { userId, title: item.title, username: item.username }
+          ]
+        });
+
+        if (existingVault) {
+          console.log("Skipping duplicate vault:", item.title);
+          skippedVaults.push(item.title);
+          continue;
+        }
+
+        // Create vault with ensured userId
+        const vault = await Vault.create({
+          userId,
+          title: item.title,
+          username: item.username,
+          password: item.password,
+          url: item.url,
+          notes: item.notes,
+          tags: item.tags,
+          createdAt: item.createdAt || new Date(),
+          updatedAt: item.updatedAt || new Date()
+        });
+        createdVaults.push(vault);
+      } catch (itemError) {
+        console.error("Error processing vault item:", item.title || 'Unknown', itemError);
+        skippedVaults.push(item.title || 'Unknown');
+      }
+    }
+
+    const response = {
+      message: "Vaults imported successfully",
+      count: createdVaults.length,
+      skipped: skippedVaults.length
+    };
+
+    if (skippedVaults.length > 0) {
+      response.message += ` (${skippedVaults.length} skipped - duplicates or invalid)`;
+    }
+
+    console.log("Import completed:", response);
+    res.status(201).json(response);
+
   } catch (err) {
     console.error("Error importing vaults:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: `Server error: ${err.message}` });
   }
 };
