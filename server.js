@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 import securityRoutes from "./routes/securityRoutes.js";
 import vaultRoutes from "./routes/vaultRoutes.js";
-import emailRoutes from "./routes/email.js";
+import emailRoutes from "./routes/emails.js";
 
 dotenv.config();
 const app = express();
@@ -32,4 +32,5 @@ mongoose
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
   })
   .catch((err) => console.error("MongoDB connection error:", err));
+
 
