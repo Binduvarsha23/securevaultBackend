@@ -8,8 +8,10 @@ const userSecrets = {}; // ⚠️ Temporary store — replace with DB in product
 // Generate QR (POST /api/generate-qr)
 router.post("/generate-qr", async (req, res) => {
   try {
+    console.log("[server] /generate-qr request body:", req.body);
     const { uid, email } = req.body;
     if (!uid || !email) {
+      console.warn("[server] /generate-qr missing uid/email");
       return res.status(400).json({ message: "Missing uid or email" });
     }
 
@@ -19,6 +21,7 @@ router.post("/generate-qr", async (req, res) => {
     });
 
     userSecrets[uid] = secret.base32;
+    console.log(`[server] secret stored for uid=${uid}`);
 
     const qrImage = await qrcode.toDataURL(secret.otpauth_url);
 
@@ -28,6 +31,7 @@ router.post("/generate-qr", async (req, res) => {
       secret: secret.base32, // 👈 include secret for manual entry
     });
   } catch (err) {
+    console.error("[server] Error generating QR:", err);
     return res.status(500).json({
       success: false,
       message: "Error generating QR",
@@ -39,8 +43,10 @@ router.post("/generate-qr", async (req, res) => {
 // Verify token (POST /api/verify-qr)
 router.post("/verify-qr", (req, res) => {
   try {
+    console.log("[server] /verify-qr body:", req.body);
     const { uid, token } = req.body;
     if (!uid || !token) {
+      console.warn("[server] /verify-qr missing uid/token");
       return res
         .status(400)
         .json({ success: false, message: "Missing uid or token" });
@@ -48,6 +54,7 @@ router.post("/verify-qr", (req, res) => {
 
     const userSecret = userSecrets[uid];
     if (!userSecret) {
+      console.warn(`[server] /verify-qr no secret for uid=${uid}`);
       return res
         .status(400)
         .json({ success: false, message: "No secret found. Generate QR again." });
@@ -60,6 +67,7 @@ router.post("/verify-qr", (req, res) => {
       window: 1,
     });
 
+    console.log(`[server] verification result for uid=${uid}:`, verified);
 
     if (!verified)
       return res
@@ -68,6 +76,7 @@ router.post("/verify-qr", (req, res) => {
 
     return res.json({ success: true, message: "Verification successful!" });
   } catch (err) {
+    console.error("[server] Verification error:", err);
     return res.status(500).json({
       success: false,
       message: "Verification failed",
